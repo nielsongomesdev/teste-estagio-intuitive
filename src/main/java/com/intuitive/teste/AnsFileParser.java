@@ -27,17 +27,19 @@ public class AnsFileParser {
             processFiles();
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            DatabaseConnection.shutdown();
         }
     }
 
     public static void processFiles() throws IOException {
-        System.out.println("=== Iniciando Processamento Contábil ===");
+        System.out.println("=== Iniciando Processamento e Gravacao no Banco ===");
 
         try (Stream<Path> paths = Files.list(Paths.get(DOWNLOAD_DIR))) {
             paths
                     .filter(p -> p.toString().endsWith(".zip"))
                     .forEach(path -> {
-                        System.out.println("\n📂 Arquivo: " + path.getFileName());
+                        System.out.println("\n>>> Processando ZIP: " + path.getFileName());
                         readZip(path);
                     });
         }
@@ -49,7 +51,8 @@ public class AnsFileParser {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 if (entry.getName().toLowerCase().endsWith(".csv")) {
-                    parseCsv(zis);
+                    System.out.println("    [LENDO CSV] " + entry.getName());
+                    parseCsv(zis, entry.getName());
                 }
             }
         } catch (IOException e) {
@@ -57,7 +60,7 @@ public class AnsFileParser {
         }
     }
 
-    private static void parseCsv(ZipInputStream zis) throws IOException {
+    private static void parseCsv(ZipInputStream zis, String fileName) throws IOException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(zis, StandardCharsets.UTF_8));
 
         CSVParser parser = CSVFormat.DEFAULT
@@ -70,7 +73,7 @@ public class AnsFileParser {
                 .build()
                 .parse(reader);
 
-        System.out.println("   Calculando Total de 'EVENTOS/SINISTROS'...");
+        System.out.println("      Calculando total de despesas...");
 
         BigDecimal totalDespesas = BigDecimal.ZERO;
         boolean encontrou = false;
@@ -84,32 +87,30 @@ public class AnsFileParser {
             String descricao = record.get(3).trim().replaceAll("\\s+", " ");
 
             if (descricao.equalsIgnoreCase(ALVO)) {
-
-                String valorString = record.get(5)
-                        .replace(".", "")
-                        .replace(",", ".");
-
+                String valorString = record.get(5).replace(".", "").replace(",", ".");
                 try {
                     BigDecimal valor = new BigDecimal(valorString);
                     totalDespesas = totalDespesas.add(valor);
                     encontrou = true;
-
-                    String valorFormatado = NumberFormat.getCurrencyInstance(new Locale("pt", "BR")).format(valor);
-                    System.out.println("   [+] Somando: " + valorFormatado);
-
                 } catch (NumberFormatException e) {
-                    System.err.println("   [ERRO] Valor inválido encontrado: " + valorString);
                 }
             }
         }
 
         if (encontrou) {
             String totalFormatado = NumberFormat.getCurrencyInstance(new Locale("pt", "BR")).format(totalDespesas);
-            System.out.println("   ------------------------------------------");
-            System.out.println("TOTAL DO TRIMESTRE: " + totalFormatado);
-            System.out.println("   ------------------------------------------");
+
+            System.out.println("      ------------------------------------------");
+            System.out.println("      TOTAL (" + fileName + "): " + totalFormatado);
+            System.out.println("      ------------------------------------------");
+
+            String trimestre = fileName.replace(".csv", "").replace(".CSV", "");
+
+            System.out.println("      Gravando no banco de dados...");
+            DatabaseConnection.saveExpense(trimestre, totalDespesas);
+
         } else {
-            System.out.println("   (Conta específica não encontrada. Verifique se o nome mudou.)");
+            System.out.println("      (Conta especifica nao encontrada neste arquivo.)");
         }
     }
 }
