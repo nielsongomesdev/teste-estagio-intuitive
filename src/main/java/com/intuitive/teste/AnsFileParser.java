@@ -6,111 +6,159 @@ import org.apache.commons.csv.CSVRecord;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.NumberFormat;
-import java.util.Locale;
-import java.util.stream.Stream;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
 
 public class AnsFileParser {
 
-    private static final String DOWNLOAD_DIR = "downloads";
+    private static final String DOWNLOAD_DIR = "downloads/";
+
+    private static final Map<String, Integer> OPERADORA_CACHE = new HashMap<>();
 
     public static void main(String[] args) {
         try {
-            processFiles();
-        } catch (IOException e) {
-            e.printStackTrace();
+            carregarCacheOperadoras();
+
+            parseAndSaveBatch("2T2025.zip", "2T2025");
+
         } finally {
             DatabaseConnection.shutdown();
         }
     }
 
-    public static void processFiles() throws IOException {
-        System.out.println("=== Iniciando Processamento e Gravacao no Banco ===");
+    private static void carregarCacheOperadoras() {
+        System.out.println("[CACHE] Carregando operadoras na memoria...");
+        String sql = "SELECT id, registro_ans FROM operadoras";
 
-        try (Stream<Path> paths = Files.list(Paths.get(DOWNLOAD_DIR))) {
-            paths
-                    .filter(p -> p.toString().endsWith(".zip"))
-                    .forEach(path -> {
-                        System.out.println("\n>>> Processando ZIP: " + path.getFileName());
-                        readZip(path);
-                    });
+        try (Connection conn = DatabaseConnection.getConnection();
+                PreparedStatement stmt = conn.prepareStatement(sql);
+                ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                int id = rs.getInt("id");
+                String reg = rs.getString("registro_ans");
+                if (reg != null) {
+                    OPERADORA_CACHE.put(String.valueOf(Long.parseLong(reg)), id);
+                    OPERADORA_CACHE.put(reg.trim(), id);
+                }
+            }
+            System.out.println("[CACHE] " + OPERADORA_CACHE.size() + " operadoras mapeadas.");
+
+        } catch (SQLException e) {
+            System.err.println("[ERRO CACHE] " + e.getMessage());
         }
-        System.out.println("\n=== Processamento Finalizado ===");
     }
 
-    private static void readZip(Path zipPath) {
-        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipPath))) {
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
+    public static void parseAndSaveBatch(String fileName, String trimestre) {
+        Path path = Paths.get(DOWNLOAD_DIR + fileName);
+        if (!Files.exists(path)) {
+            System.out.println("[AVISO] Arquivo nao encontrado: " + fileName);
+            return;
+        }
+
+        System.out.println("\n>>> Iniciando Processamento OTIMIZADO (Batch) de: " + fileName);
+
+        String sql = "INSERT INTO detalhe_despesas (operadora_id, trimestre, data_evento, valor) VALUES (?, ?, ?, ?)";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+                ZipFile zipFile = new ZipFile(path.toFile());
+                PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            conn.setAutoCommit(false);
+
+            Enumeration<? extends ZipEntry> entries = zipFile.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
                 if (entry.getName().toLowerCase().endsWith(".csv")) {
-                    System.out.println("    [LENDO CSV] " + entry.getName());
-                    parseCsv(zis, entry.getName());
+                    processarCSV(zipFile, entry, stmt, trimestre);
+                    conn.commit();
                 }
             }
-        } catch (IOException e) {
-            System.err.println("Erro ao ler zip: " + e.getMessage());
+
+        } catch (Exception e) {
+            System.err.println("[ERRO GERAL] " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    private static void parseCsv(ZipInputStream zis, String fileName) throws IOException {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(zis, StandardCharsets.UTF_8));
+    private static void processarCSV(ZipFile zip, ZipEntry entry, PreparedStatement stmt, String trimestre)
+            throws IOException, SQLException {
+        try (InputStream is = zip.getInputStream(entry);
+                InputStreamReader isr = new InputStreamReader(is, StandardCharsets.ISO_8859_1);
+                BufferedReader reader = new BufferedReader(isr)) {
 
-        CSVParser parser = CSVFormat.DEFAULT
-                .builder()
-                .setDelimiter(';')
-                .setHeader()
-                .setSkipHeaderRecord(true)
-                .setIgnoreHeaderCase(true)
-                .setTrim(true)
-                .build()
-                .parse(reader);
+            CSVParser parser = CSVFormat.DEFAULT.builder()
+                    .setDelimiter(';').setHeader().setSkipHeaderRecord(true).setIgnoreHeaderCase(true).setTrim(true)
+                    .build().parse(reader);
 
-        System.out.println("      Calculando total de despesas...");
+            int salvos = 0;
+            int ignorados = 0;
+            int countDebug = 0;
 
-        BigDecimal totalDespesas = BigDecimal.ZERO;
-        boolean encontrou = false;
+            System.out.println("[INFO] Lendo CSV: " + entry.getName());
 
-        String ALVO = "EVENTOS/ SINISTROS CONHECIDOS OU AVISADOS DE ASSISTÊNCIA A SAÚDE MEDICO HOSPITALAR";
+            for (CSVRecord record : parser) {
+                if (countDebug < 5) {
+                    System.out.println("   [DEBUG LINHA] Descricao: " + record.get("DESCRICAO") + " | Reg: "
+                            + record.get("REG_ANS"));
+                    countDebug++;
+                }
 
-        for (CSVRecord record : parser) {
-            if (record.size() < 6)
-                continue;
+                String descricao = record.get("DESCRICAO").toUpperCase();
+                if (!descricao.contains("EVENTOS") && !descricao.contains("DESPESA")) {
+                    continue;
+                }
 
-            String descricao = record.get(3).trim().replaceAll("\\s+", " ");
-
-            if (descricao.equalsIgnoreCase(ALVO)) {
-                String valorString = record.get(5).replace(".", "").replace(",", ".");
                 try {
-                    BigDecimal valor = new BigDecimal(valorString);
-                    totalDespesas = totalDespesas.add(valor);
-                    encontrou = true;
-                } catch (NumberFormatException e) {
+                    String regAnsRaw = record.get("REG_ANS");
+                    String regAnsKey = String.valueOf(Long.parseLong(regAnsRaw));
+
+                    Integer operadoraId = OPERADORA_CACHE.get(regAnsKey);
+
+                    if (operadoraId == null)
+                        operadoraId = OPERADORA_CACHE.get(regAnsRaw);
+
+                    if (operadoraId != null) {
+                        String valorStr = record.get("VL_SALDO_FINAL").replace(".", "").replace(",", ".");
+                        BigDecimal valor = new BigDecimal(valorStr);
+
+                        stmt.setInt(1, operadoraId);
+                        stmt.setString(2, trimestre);
+                        stmt.setDate(3, java.sql.Date.valueOf(record.get("DATA")));
+                        stmt.setBigDecimal(4, valor);
+
+                        stmt.addBatch();
+                        salvos++;
+
+                        if (salvos % 2000 == 0) {
+                            stmt.executeBatch();
+                            stmt.getConnection().commit();
+                            System.out.print(".");
+                        }
+                    } else {
+                        ignorados++;
+                    }
+
+                } catch (Exception e) {
                 }
             }
-        }
-
-        if (encontrou) {
-            String totalFormatado = NumberFormat.getCurrencyInstance(new Locale("pt", "BR")).format(totalDespesas);
-
-            System.out.println("      ------------------------------------------");
-            System.out.println("      TOTAL (" + fileName + "): " + totalFormatado);
-            System.out.println("      ------------------------------------------");
-
-            String trimestre = fileName.replace(".csv", "").replace(".CSV", "");
-
-            System.out.println("      Gravando no banco de dados...");
-            DatabaseConnection.saveExpense(trimestre, totalDespesas);
-
-        } else {
-            System.out.println("      (Conta especifica nao encontrada neste arquivo.)");
+            stmt.executeBatch();
+            System.out
+                    .println("\n[FIM] " + salvos + " despesas salvas. (" + ignorados + " operadoras nao encontradas).");
         }
     }
 }
