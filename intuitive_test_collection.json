@@ -1,0 +1,72 @@
+{
+  "info": {
+    "_postman_id": "b5a9c9c1-5f8e-4b1a-9c9d-123456789abc",
+    "name": "Intuitive Care - Teste Técnico",
+    "description": "Coleção para teste da API de Operadoras de Plano de Saúde.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Listar Todas as Operadoras",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/operador",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "operador"]
+        },
+        "description": "Retorna a lista completa de operadoras cadastradas no banco."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Buscar por Termo (Ex: UNIMED)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/operador?busca=UNIMED",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "operador"],
+          "query": [
+            {
+              "key": "busca",
+              "value": "UNIMED",
+              "description": "Filtra por Razão Social (case insensitive)"
+            }
+          ]
+        },
+        "description": "Realiza uma busca textual na base de dados."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Buscar por CNPJ Específico",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/operador?busca=005711",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "operador"],
+          "query": [
+            {
+              "key": "busca",
+              "value": "005711",
+              "description": "Busca exata ou parcial pelo Registro ANS ou CNPJ"
+            }
+          ]
+        },
+        "description": "Simula a busca de detalhes de uma operadora específica."
+      },
+      "response": []
+    }
+  ]
+}

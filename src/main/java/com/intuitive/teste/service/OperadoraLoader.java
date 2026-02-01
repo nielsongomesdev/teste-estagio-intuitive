@@ -1,5 +1,6 @@
-package com.intuitive.teste;
+package com.intuitive.teste.service;
 
+import com.intuitive.teste.config.DatabaseConnection;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -98,7 +99,6 @@ public class OperadoraLoader {
             System.out.println("\n[SUCESSO] " + count + " operadoras importadas via Batch!");
 
         } catch (Exception e) {
-            System.err.println("[ERRO FATAL] " + e.getMessage());
             e.printStackTrace();
         }
     }

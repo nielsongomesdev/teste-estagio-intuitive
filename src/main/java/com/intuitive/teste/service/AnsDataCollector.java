@@ -1,4 +1,4 @@
-package com.intuitive.teste;
+package com.intuitive.teste.service;
 
 import java.io.IOException;
 import java.io.InputStream;
