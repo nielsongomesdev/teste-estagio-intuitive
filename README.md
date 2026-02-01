@@ -1,5 +1,7 @@
 # Monitor ANS - Intuitive Care (Desafio Técnico)
 
+![alt text](Animação.gif)
+
 O projeto combina a segurança e robustez do **Java (Spring Boot)** no backend com a performance e reatividade do **Vue.js** no frontend, apresentando uma interface moderna alinhada à identidade visual da empresa.
 
 ---
@@ -16,7 +18,7 @@ A arquitetura foi pensada para ser **Simples**, **Segura** e **Performática**. 
 ### Passo a Passo
 1.  **Clone o repositório:**
     ```bash
-    git clone [https://github.com/nielsongomesdev/teste-estagio-intuitive.git](https://github.com/nielsongomesdev/teste-estagio-intuitive.git)
+    git clone https://github.com/nielsongomesdev/teste-estagio-intuitive.git
     cd teste-estagio-intuitive
     ```
 
